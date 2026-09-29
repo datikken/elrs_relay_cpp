@@ -1,9 +1,10 @@
 #include "crsf.h"
+#include <Arduino.h>
 
 // ============================================================
 // CRC8 — polynomial 0xD5
 //
-// Go equivalent:
+// Go equivalent:>
 //   func crc8(data []byte) byte {
 //       var crc byte = 0
 //       for _, b := range data {
