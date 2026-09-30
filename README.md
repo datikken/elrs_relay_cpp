@@ -1,90 +1,76 @@
-# ELRS Relay — WiFi CRSF-мост через VPS
+# ELRS Relay v2 - WiFi CRSF bridge via VPS with pair routing
 
-Проект пересылает CRSF-кадры между пультом (TX12) и JR-модулем (Bandit) через интернет
-с помощью релейного сервера на VPS.
-
-## Структура
+## Architecture
 
 ```
-elrs_relay/
-├── platformio.ini          # конфигурация PlatformIO (два окружения: pilot, drone)
-├── src/
-│   ├── pilot/
-│   │   └── main.cpp         # прошивка для ESP32 #1 (в пульте)
-│   └── drone/
-│       └── main.cpp         # прошивка для ESP32 #2 (рядом с Bandit)
-├── relay.py                 # релейный сервер для VPS
-└── README.md
+TX12 --3 wires--> ESP32 #1 (pilot)
+                     | WiFi STA -> router -> internet
+                     |
+                     +-- UDP --> VPS (relay) <-- UDP --+
+                          (pairId + role)               |
+                                                 ESP32 #2 (drone)
+                                                 | WiFi STA
+                                                 |
+                                          4 wires -- JR Module Bandit
 ```
 
-## Схема
+## Packet structure
 
 ```
-[ TX12 пульт ] ──JR-bay──→ [ ESP32 #1 pilot ]
-                                   │
-                              WiFi → роутер → интернет
-                                   │
-                              [ VPS: relay.py ] ← UDP 14550
-                                   │
-                              интернет → роутер → WiFi
-                                   │
-[ Bandit модуль ] ←─UART2─ [ ESP32 #2 drone ]
+[PAIR_ID: 4 bytes] [ROLE: 1 byte] [CRSF frame: N bytes]
+                    0x00 = pilot
+                    0x01 = drone
 ```
 
-## Что нужно изменить перед прошивкой
+Relay parses header, finds pair by pairId, forwards pure CRSF to peer.
 
-В обоих файлах (src/pilot/main.cpp и src/drone/main.cpp):
+## Files
+
+| File | Purpose |
+|---|---|
+| `platformio.ini` | PlatformIO: two envs (pilot / drone) |
+| `src/pilot/main.cpp` | ESP32 #1 - in transmitter |
+| `src/drone/main.cpp` | ESP32 #2 - near Bandit |
+| `relay.py` | relay server for VPS |
+
+## Setup before flashing
+
+In both `main.cpp` replace:
 
 ```cpp
-#define WIFI_SSID       "YOUR_WIFI"        // имя WiFi-сети
-#define WIFI_PASS       "YOUR_PASSWORD"    // пароль WiFi
-#define RELAY_IP        "185.xxx.xxx.xxx"  // публичный IP твоего VPS
+#define WIFI_SSID       "YOUR_WIFI"
+#define WIFI_PASS       "YOUR_PASSWORD"
+#define RELAY_IP        "185.xxx.xxx.xxx"
 ```
 
-У пилота и дрона SSID/пароль могут быть разными — каждый подключается к своему WiFi.
-IP релея — одинаковый.
+Make sure PAIR_ID is the same for pilot and drone.
 
-## Прошивка
+## Flashing
 
 ```bash
-# Пилот
 pio run -e pilot -t upload
-
-# Дрон
 pio run -e drone -t upload
-
-# Монитор
-pio device monitor
 ```
 
-## Запуск релея на VPS
+## Running relay on VPS
 
 ```bash
-scp relay.py user@185.xxx.xxx.xxx:~/
+scp relay.py user@VPS_IP:~/
 sudo ufw allow 14550/udp
 python3 relay.py
 ```
 
-## Пины ESP32 (30-pin NodeMCU)
+## Multiple pairs
 
-| Пин     | Назначение         |
-|---------|--------------------|
-| GPIO16  | RX2 (CRSF приём)   |
-| GPIO17  | TX2 (CRSF передача)|
-| GPIO2   | LED (индикатор)    |
-| GND     | Земля              |
+Each pair has its own PAIR_ID (4 bytes). Change PAIR_ID_BYTE0..3 in both main.cpp.
 
-## Порядок включения
+## Power-on order
 
-1. Включить дрон (ESP32 #2 + Bandit)
-2. Подождать 5 секунд
-3. Включить пульт TX12 (с ESP32 #1 в JR-bay)
-4. Проверить стики в Betaflight
+1. Turn on drone -> wait 5 sec
+2. Turn on transmitter -> wait 5 sec
+3. Check sticks
 
-## Светодиод
+## Power-off order
 
-| Режим          | Мигание   |
-|----------------|-----------|
-| Кадры идут     | 100 мс    |
-| Кадров нет     | 1000 мс   |
-| Failsafe (дрон)| 200 мс    |
+1. Turn off transmitter
+2. Turn off drone

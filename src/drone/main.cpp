@@ -2,12 +2,19 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
-// === Настройки сети ===
+// === Network ===
 #define WIFI_SSID       "YOUR_WIFI"
 #define WIFI_PASS       "YOUR_PASSWORD"
 #define RELAY_IP        "185.xxx.xxx.xxx"
 #define RELAY_PORT      14550
 #define LOCAL_PORT      14552
+
+// === Pair routing ===
+#define PAIR_ID_BYTE0    0xAB
+#define PAIR_ID_BYTE1    0x12
+#define PAIR_ID_BYTE2    0x34
+#define PAIR_ID_BYTE3    0x56
+#define ROLE_DRONE       0x01
 
 // === CRSF ===
 #define CRSF_BAUD        420000
@@ -16,9 +23,8 @@
 
 // === Failsafe ===
 #define FAILSAFE_TIMEOUT_MS   500
-#define FAILSAFE_CHANNELS     16
 
-// === Пины ===
+// === Pins ===
 #define RX_PIN           16
 #define TX_PIN           17
 #define LED_PIN          2
@@ -27,6 +33,7 @@ WiFiUDP udp;
 uint8_t  rxBuf[CRSF_MAX_FRAME];
 uint8_t  rxIdx = 0, rxLen = 0;
 uint8_t  udpBuf[CRSF_MAX_FRAME];
+uint8_t  txBuf[CRSF_MAX_FRAME + 5];
 uint32_t lastFrameMs = 0;
 bool     inFailsafe = false;
 uint32_t framesSent = 0, framesReceived = 0, lastStatsMs = 0;
@@ -66,7 +73,7 @@ void buildFailsafeFrame(uint8_t *out, uint8_t &outLen) {
     out[2] = 0x16;
     uint16_t ch[16];
     for (int i = 0; i < 16; i++) ch[i] = 992;
-    ch[2] = 172;  // throttle = 0
+    ch[2] = 172;
     uint8_t *p = out + 3;
     memset(p, 0, 22);
     uint8_t bitIdx = 0;
@@ -115,15 +122,24 @@ void receiveFromRelay() {
 
 void sendToRelay(const uint8_t *data, uint8_t len) {
     if (!wifiConnected) return;
+    txBuf[0] = PAIR_ID_BYTE0;
+    txBuf[1] = PAIR_ID_BYTE1;
+    txBuf[2] = PAIR_ID_BYTE2;
+    txBuf[3] = PAIR_ID_BYTE3;
+    txBuf[4] = ROLE_DRONE;
+    memcpy(txBuf + 5, data, len);
+
     udp.beginPacket(RELAY_IP, RELAY_PORT);
-    udp.write(data, len);
+    udp.write(txBuf, len + 5);
     udp.endPacket();
     framesSent++;
 }
 
 void setup() {
     Serial.begin(115200); delay(200);
-    Serial.println("\n=== ELRS RELAY: DRONE ===");
+    Serial.println("\n=== ELRS RELAY v2: DRONE ===");
+    Serial.printf("PairID: %02X%02X%02X%02X Role: DRONE\n",
+        PAIR_ID_BYTE0, PAIR_ID_BYTE1, PAIR_ID_BYTE2, PAIR_ID_BYTE3);
     pinMode(LED_PIN, OUTPUT); digitalWrite(LED_PIN, LOW);
     Serial2.begin(CRSF_BAUD, SERIAL_8N1, RX_PIN, TX_PIN);
     Serial.println("UART2 @ 420000");

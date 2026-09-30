@@ -2,28 +2,35 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
-// === Настройки сети ===
+// === Network ===
 #define WIFI_SSID       "YOUR_WIFI"
 #define WIFI_PASS       "YOUR_PASSWORD"
 #define RELAY_IP        "185.xxx.xxx.xxx"
 #define RELAY_PORT      14550
 #define LOCAL_PORT      14551
 
+// === Pair routing ===
+#define PAIR_ID_BYTE0    0xAB
+#define PAIR_ID_BYTE1    0x12
+#define PAIR_ID_BYTE2    0x34
+#define PAIR_ID_BYTE3    0x56
+#define ROLE_PILOT       0x00
+
 // === CRSF ===
 #define CRSF_BAUD        420000
 #define CRSF_SYNC        0xC8
 #define CRSF_MAX_FRAME   64
 
-// === Пины ===
+// === Pins ===
 #define RX_PIN           16
 #define TX_PIN           17
 #define LED_PIN          2
 
 WiFiUDP udp;
 uint8_t  rxBuf[CRSF_MAX_FRAME];
-uint8_t  rxIdx = 0;
-uint8_t  rxLen = 0;
+uint8_t  rxIdx = 0, rxLen = 0;
 uint8_t  udpBuf[CRSF_MAX_FRAME];
+uint8_t  txBuf[CRSF_MAX_FRAME + 5];
 uint32_t framesSent = 0, framesReceived = 0, lastStatsMs = 0;
 bool wifiConnected = false;
 
@@ -76,8 +83,15 @@ bool readCrsfFrame() {
 
 void sendToRelay(const uint8_t *data, uint8_t len) {
     if (!wifiConnected) return;
+    txBuf[0] = PAIR_ID_BYTE0;
+    txBuf[1] = PAIR_ID_BYTE1;
+    txBuf[2] = PAIR_ID_BYTE2;
+    txBuf[3] = PAIR_ID_BYTE3;
+    txBuf[4] = ROLE_PILOT;
+    memcpy(txBuf + 5, data, len);
+
     udp.beginPacket(RELAY_IP, RELAY_PORT);
-    udp.write(data, len);
+    udp.write(txBuf, len + 5);
     udp.endPacket();
     framesSent++;
 }
@@ -95,7 +109,9 @@ void receiveFromRelay() {
 
 void setup() {
     Serial.begin(115200); delay(200);
-    Serial.println("\n=== ELRS RELAY: PILOT ===");
+    Serial.println("\n=== ELRS RELAY v2: PILOT ===");
+    Serial.printf("PairID: %02X%02X%02X%02X Role: PILOT\n",
+        PAIR_ID_BYTE0, PAIR_ID_BYTE1, PAIR_ID_BYTE2, PAIR_ID_BYTE3);
     pinMode(LED_PIN, OUTPUT); digitalWrite(LED_PIN, LOW);
     Serial2.begin(CRSF_BAUD, SERIAL_8N1, RX_PIN, TX_PIN);
     Serial.println("UART2 @ 420000");
